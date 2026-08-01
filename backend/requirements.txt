@@ -1,0 +1,25 @@
+# FastAPI & Server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.1
+pgvector==0.3.6
+
+# LLM Providers
+anthropic==0.42.0
+openai==1.58.1
+httpx==0.28.1
+
+# RAG & Embeddings
+tiktoken==0.8.0
+
+# Utilities
+python-dotenv==1.0.1
+pydantic-settings==2.7.1
+pyyaml==6.0.2
+sse-starlette==2.2.1
+uuid6==2024.7.10
