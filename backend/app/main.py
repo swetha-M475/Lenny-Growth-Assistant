@@ -68,11 +68,6 @@ app.include_router(sessions.router)
 app.include_router(chat.router)
 app.include_router(config.router)
 
-# Serve frontend static files
-frontend_dir = Path(__file__).parent.parent.parent / "frontend"
-if frontend_dir.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
-
 
 @app.get("/api/health")
 async def root_health():
@@ -94,3 +89,9 @@ async def trigger_ingestion():
         return {"status": "success", "chunks_ingested": count}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# Serve frontend static files (must be mounted last)
+frontend_dir = Path(__file__).parent.parent.parent / "frontend"
+if frontend_dir.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
