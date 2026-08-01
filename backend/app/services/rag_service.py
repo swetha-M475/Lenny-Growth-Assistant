@@ -116,10 +116,10 @@ async def retrieve_relevant_chunks(
             episode_title,
             chunk_text,
             metadata,
-            1 - (embedding <=> :embedding::vector) as similarity
+            1 - (embedding <=> CAST(:embedding AS vector)) as similarity
         FROM transcript_chunks
         WHERE embedding IS NOT NULL
-        ORDER BY embedding <=> :embedding::vector
+        ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :top_k
     """)
 
