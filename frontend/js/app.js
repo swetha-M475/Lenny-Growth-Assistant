@@ -378,27 +378,90 @@ function extractFrontendArtifacts(msg) {
         }
     }
     
-    // 2. Fallback: Extract code blocks if no XML artifacts were parsed
+    // 2. Fallback: Parse separate HTML, CSS, and JS code blocks and combine them
     if (msg.artifacts.length === 0) {
-        const codeBlockRegex = /```(?:html|xml|svg|css|js|javascript)?\s*([\s\S]*?)```/gi;
-        let blockIndex = 1;
+        const codeBlockRegex = /```(html|xml|svg|css|js|javascript)?\s*([\s\S]*?)```/gi;
+        const htmlBlocks = [];
+        const cssBlocks = [];
+        const jsBlocks = [];
+        
         while ((match = codeBlockRegex.exec(contentToParse)) !== null) {
-            const codeContent = match[1].trim();
-            if (codeContent.includes('<html') || codeContent.includes('<!DOCTYPE') || codeContent.includes('<div') || codeContent.includes('<svg') || codeContent.includes('<style') || codeContent.includes('<body')) {
-                const title = `HTML Visual Block ${blockIndex++}`;
-                if (!msg.artifacts.some(a => a.content === codeContent)) {
-                    const art = {
-                        id: 'fe-block-' + Math.random().toString(36).substr(2, 9),
-                        type: 'html',
-                        title: title,
-                        content: codeContent
-                    };
-                    msg.artifacts.push(art);
-                    if (!state.artifacts.some(a => a.content === codeContent)) {
-                        state.artifacts.push(art);
+            const lang = (match[1] || '').toLowerCase();
+            const content = match[2].trim();
+            
+            if (lang === 'html' || content.includes('<html') || content.includes('<!DOCTYPE') || content.includes('<div') || content.includes('<svg')) {
+                htmlBlocks.push(content);
+            } else if (lang === 'css' || content.includes('body {') || content.includes('margin:') || content.includes('padding:')) {
+                cssBlocks.push(content);
+            } else if (lang === 'js' || lang === 'javascript' || content.includes('function ') || content.includes('document.') || content.includes('let ') || content.includes('const ')) {
+                jsBlocks.push(content);
+            }
+        }
+        
+        // If we found HTML, merge the blocks together into a single, fully-formed page
+        if (htmlBlocks.length > 0) {
+            const mainHtml = htmlBlocks.join('\n');
+            const cssContent = cssBlocks.join('\n');
+            const jsContent = jsBlocks.join('\n');
+            
+            let combinedContent = '';
+            
+            if (mainHtml.includes('<html') || mainHtml.includes('<!DOCTYPE')) {
+                // Complete page: inject CSS inside </head> and JS inside </body>
+                combinedContent = mainHtml;
+                if (cssContent) {
+                    if (combinedContent.includes('</head>')) {
+                        combinedContent = combinedContent.replace('</head>', `<style>\n${cssContent}\n</style>\n</head>`);
+                    } else {
+                        combinedContent = `<style>\n${cssContent}\n</style>\n` + combinedContent;
                     }
                 }
+                if (jsContent) {
+                    if (combinedContent.includes('</body>')) {
+                        combinedContent = combinedContent.replace('</body>', `<script>\n${jsContent}\n</script>\n</body>`);
+                    } else {
+                        combinedContent = combinedContent + `\n<script>\n${jsContent}\n</script>`;
+                    }
+                }
+            } else {
+                // HTML snippet: wrap in standard HTML skeleton with styling and script tags
+                combinedContent = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Visualization</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 24px;
+            background: #0f172a;
+            color: #f1f5f9;
+        }
+        ${cssContent}
+    </style>
+</head>
+<body>
+    ${mainHtml}
+    
+    <script>
+        // Wait for DOM loading
+        document.addEventListener('DOMContentLoaded', () => {
+            ${jsContent}
+        });
+    </script>
+</body>
+</html>`;
             }
+            
+            const art = {
+                id: 'fe-combined-' + Math.random().toString(36).substr(2, 9),
+                type: 'html',
+                title: 'HTML Interactive Dashboard',
+                content: combinedContent
+            };
+            msg.artifacts.push(art);
+            state.artifacts.push(art);
         }
     }
 }
