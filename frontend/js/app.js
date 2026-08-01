@@ -389,12 +389,22 @@ function extractFrontendArtifacts(msg) {
             const lang = (match[1] || '').toLowerCase();
             const content = match[2].trim();
             
-            if (lang === 'html' || content.includes('<html') || content.includes('<!DOCTYPE') || content.includes('<div') || content.includes('<svg')) {
+            // Trust explicit language identifiers first
+            if (lang === 'html') {
                 htmlBlocks.push(content);
-            } else if (lang === 'css' || content.includes('body {') || content.includes('margin:') || content.includes('padding:')) {
+            } else if (lang === 'css') {
                 cssBlocks.push(content);
-            } else if (lang === 'js' || lang === 'javascript' || content.includes('function ') || content.includes('document.') || content.includes('let ') || content.includes('const ')) {
+            } else if (lang === 'js' || lang === 'javascript') {
                 jsBlocks.push(content);
+            } else {
+                // Sniff content only if language tag is missing
+                if (content.includes('<html') || content.includes('<!DOCTYPE') || content.includes('<div') || content.includes('<svg') || content.includes('<body') || content.includes('<style')) {
+                    htmlBlocks.push(content);
+                } else if (content.includes('body {') || content.includes('margin:') || content.includes('padding:')) {
+                    cssBlocks.push(content);
+                } else if (content.includes('function ') || content.includes('document.') || content.includes('let ') || content.includes('const ')) {
+                    jsBlocks.push(content);
+                }
             }
         }
         
