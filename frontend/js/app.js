@@ -351,7 +351,62 @@ function renderMessages() {
     scrollToBottom();
 }
 
+function extractFrontendArtifacts(msg) {
+    if (msg.role !== 'assistant') return;
+    
+    if (!msg.artifacts) msg.artifacts = [];
+    
+    // 1. Extract XML <artifact> tags
+    const artifactRegex = /<artifact\s+type="(html|markdown)"\s+title="([^"]*)">([\s\S]*?)<\/artifact>/gi;
+    let match;
+    const contentToParse = msg.content;
+    
+    while ((match = artifactRegex.exec(contentToParse)) !== null) {
+        const [_, type, title, content] = match;
+        const cleanTitle = title.trim();
+        if (!msg.artifacts.some(a => a.title === cleanTitle)) {
+            const art = {
+                id: 'fe-' + Math.random().toString(36).substr(2, 9),
+                type: type.toLowerCase(),
+                title: cleanTitle,
+                content: content.trim()
+            };
+            msg.artifacts.push(art);
+            if (!state.artifacts.some(a => a.title === cleanTitle)) {
+                state.artifacts.push(art);
+            }
+        }
+    }
+    
+    // 2. Fallback: Extract ```html ... ``` blocks if no XML artifacts were parsed
+    if (msg.artifacts.length === 0) {
+        const htmlBlockRegex = /```html\s*([\s\S]*?)```/gi;
+        let blockIndex = 1;
+        while ((match = htmlBlockRegex.exec(contentToParse)) !== null) {
+            const codeContent = match[1].trim();
+            if (codeContent.includes('<html') || codeContent.includes('<!DOCTYPE') || codeContent.includes('<div') || codeContent.includes('<svg')) {
+                const title = `HTML Visual Block ${blockIndex++}`;
+                if (!msg.artifacts.some(a => a.content === codeContent)) {
+                    const art = {
+                        id: 'fe-block-' + Math.random().toString(36).substr(2, 9),
+                        type: 'html',
+                        title: title,
+                        content: codeContent
+                    };
+                    msg.artifacts.push(art);
+                    if (!state.artifacts.some(a => a.content === codeContent)) {
+                        state.artifacts.push(art);
+                    }
+                }
+            }
+        }
+    }
+}
+
 function createMessageElement(msg) {
+    // Extract any visual artifacts on-the-fly from raw content
+    extractFrontendArtifacts(msg);
+
     const div = document.createElement('div');
     div.className = `message ${msg.role}`;
     div.dataset.id = msg.id;
@@ -369,8 +424,12 @@ function createMessageElement(msg) {
     // Render content
     let renderedContent = '';
     if (msg.role === 'assistant') {
-        // Strip artifact tags from displayed content
-        let cleanContent = msg.content.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/g, '').trim();
+        // Strip XML artifacts from the chat bubble
+        let cleanContent = msg.content.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/gi, '').trim();
+        // Strip raw HTML code blocks if they were extracted to side panel
+        if (msg.artifacts.length > 0) {
+            cleanContent = cleanContent.replace(/```html[\s\S]*?```/gi, '').trim();
+        }
         renderedContent = renderMarkdown(cleanContent);
     } else {
         renderedContent = escapeHtml(msg.content);
