@@ -378,13 +378,13 @@ function extractFrontendArtifacts(msg) {
         }
     }
     
-    // 2. Fallback: Extract ```html ... ``` blocks if no XML artifacts were parsed
+    // 2. Fallback: Extract code blocks if no XML artifacts were parsed
     if (msg.artifacts.length === 0) {
-        const htmlBlockRegex = /```html\s*([\s\S]*?)```/gi;
+        const codeBlockRegex = /```(?:html|xml|svg|css|js|javascript)?\s*([\s\S]*?)```/gi;
         let blockIndex = 1;
-        while ((match = htmlBlockRegex.exec(contentToParse)) !== null) {
+        while ((match = codeBlockRegex.exec(contentToParse)) !== null) {
             const codeContent = match[1].trim();
-            if (codeContent.includes('<html') || codeContent.includes('<!DOCTYPE') || codeContent.includes('<div') || codeContent.includes('<svg')) {
+            if (codeContent.includes('<html') || codeContent.includes('<!DOCTYPE') || codeContent.includes('<div') || codeContent.includes('<svg') || codeContent.includes('<style') || codeContent.includes('<body')) {
                 const title = `HTML Visual Block ${blockIndex++}`;
                 if (!msg.artifacts.some(a => a.content === codeContent)) {
                     const art = {
