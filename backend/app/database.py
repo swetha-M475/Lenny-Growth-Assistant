@@ -2,7 +2,6 @@
 Database setup — Async SQLAlchemy engine for PostgreSQL with pgvector.
 """
 
-from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -16,7 +15,6 @@ engine = create_async_engine(
     max_overflow=10,
     connect_args={
         "statement_cache_size": 0,
-        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
     }
 )
 
