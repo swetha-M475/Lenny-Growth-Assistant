@@ -118,6 +118,7 @@ body {
     flex-direction: column;
     transition: transform var(--transition-base), width var(--transition-base), min-width var(--transition-base);
     z-index: 100;
+    overflow: hidden;
 }
 
 .sidebar.collapsed {

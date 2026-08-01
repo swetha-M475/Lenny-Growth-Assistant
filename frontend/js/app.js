@@ -330,17 +330,18 @@ async function sendMessage() {
 
 // ─── Message Rendering ─────────────────────────────────────
 function renderMessages() {
+    const container = dom.messagesContainer;
+
+    // Clear previous message elements first
+    const existing = container.querySelectorAll('.message');
+    existing.forEach((el) => el.remove());
+
     if (state.messages.length === 0) {
         showWelcomeScreen();
         return;
     }
 
     hideWelcomeScreen();
-    const container = dom.messagesContainer;
-
-    // Keep welcome screen element but build messages after it
-    const existing = container.querySelectorAll('.message');
-    existing.forEach((el) => el.remove());
 
     state.messages.forEach((msg) => {
         const el = createMessageElement(msg);
@@ -484,7 +485,8 @@ function renderArtifactTabs() {
 function renderArtifactContent(artifact) {
     dom.artifactContent.innerHTML = '';
 
-    if (artifact.type === 'html') {
+    const type = artifact.type || artifact.artifact_type;
+    if (type === 'html') {
         const iframe = document.createElement('iframe');
         iframe.sandbox = 'allow-scripts allow-same-origin';
         iframe.srcdoc = artifact.content;
