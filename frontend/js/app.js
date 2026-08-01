@@ -240,6 +240,7 @@ async function sendMessage() {
     // Ensure we have an active session
     if (!state.activeSessionId) {
         await createNewChat();
+        if (!state.activeSessionId) return; // Exit if session creation failed
     }
 
     const skillHint = dom.skillSelect.value;

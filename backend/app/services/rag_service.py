@@ -1,11 +1,9 @@
-"""
-RAG Service — Retrieval-Augmented Generation using pgvector cosine similarity.
-"""
-
-import logging
-from typing import List, Optional
 from dataclasses import dataclass
-
+import logging
+from pathlib import Path
+import re
+from typing import List, Optional
+import yaml
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +11,8 @@ from app.ingestion.embeddings import generate_embedding
 from app.models import TranscriptChunk
 
 logger = logging.getLogger(__name__)
+
+TRANSCRIPTS_DIR = Path(__file__).parent.parent.parent / "data" / "transcripts"
 
 
 @dataclass
@@ -25,6 +25,68 @@ class RetrievedChunk:
     metadata: dict
 
 
+async def retrieve_from_files(query: str, top_k: int = 5) -> List[RetrievedChunk]:
+    """Fallback RAG: keyword search directly over files when PostgreSQL is offline."""
+    logger.info(f"Database offline: performing keyword search over local transcripts directory...")
+    episodes_dir = TRANSCRIPTS_DIR / "episodes"
+    if not episodes_dir.exists():
+        logger.warning(f"Transcripts directory not found at: {episodes_dir}")
+        return []
+
+    # Import ingestion parser helpers
+    from app.ingestion.ingest import parse_transcript, chunk_text
+
+    keywords = [w.lower() for w in re.findall(r"\b\w{4,}\b", query)]
+    if not keywords:
+        keywords = [w.lower() for w in query.split() if w.strip()]
+
+    scored_chunks = []
+    episode_dirs = list(episodes_dir.iterdir())
+
+    for episode_dir in episode_dirs:
+        transcript_file = episode_dir / "transcript.md"
+        if not transcript_file.exists():
+            continue
+
+        guest_name = episode_dir.name
+        metadata, content = parse_transcript(transcript_file)
+        if not content:
+            continue
+
+        title = metadata.get("title", guest_name)
+        chunks = chunk_text(content)
+
+        for chunk_text_content in chunks:
+            chunk_lower = chunk_text_content.lower()
+            # Calculate match frequency
+            score = sum(chunk_lower.count(kw) for kw in keywords)
+
+            # Give bonus if guest's name is mentioned in query
+            if guest_name.replace("-", " ").lower() in query.lower():
+                score += 5
+
+            if score > 0:
+                scored_chunks.append((
+                    score,
+                    RetrievedChunk(
+                        guest=guest_name,
+                        episode_title=title,
+                        chunk_text=chunk_text_content,
+                        similarity=min(0.5 + (score / 20.0), 0.99),
+                        metadata={
+                            "guest": metadata.get("guest", guest_name),
+                            "publish_date": str(metadata.get("publish_date", "")),
+                            "youtube_url": metadata.get("youtube_url", ""),
+                            "duration": metadata.get("duration", ""),
+                        }
+                    )
+                ))
+
+    # Sort by keyword matching score descending
+    scored_chunks.sort(key=lambda x: x[0], reverse=True)
+    return [chunk for _, chunk in scored_chunks[:top_k]]
+
+
 async def retrieve_relevant_chunks(
     query: str,
     db: AsyncSession,
@@ -33,7 +95,11 @@ async def retrieve_relevant_chunks(
 ) -> List[RetrievedChunk]:
     """
     Embed the query and find the most relevant transcript chunks via cosine similarity.
+    If database connection is offline (db is None), fall back to direct file search.
     """
+    if db is None:
+        return await retrieve_from_files(query, top_k)
+
     try:
         query_embedding = await generate_embedding(query)
     except Exception as e:

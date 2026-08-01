@@ -27,8 +27,26 @@ class Base(DeclarativeBase):
     pass
 
 
+# Global state to indicate if real database is ready
+db_initialized = False
+
+# In-memory storage fallback when database is not running
+mock_db = {
+    "users": {},
+    "sessions": {},
+    "messages": {},
+    "artifacts": {},
+    "transcript_chunks": []
+}
+
+
 async def get_db() -> AsyncSession:
     """FastAPI dependency: yields an async database session."""
+    if not db_initialized:
+        # Yield None if not initialized — routes will handle mock fallback
+        yield None
+        return
+
     async with async_session_factory() as session:
         try:
             yield session
@@ -42,12 +60,18 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     """Create all tables (used in development; production uses Alembic)."""
-    async with engine.begin() as conn:
-        # Enable pgvector extension
-        await conn.execute(
-            __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
-        )
-        await conn.run_sync(Base.metadata.create_all)
+    global db_initialized
+    try:
+        async with engine.begin() as conn:
+            # Enable pgvector extension
+            await conn.execute(
+                __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
+            )
+            await conn.run_sync(Base.metadata.create_all)
+        db_initialized = True
+    except Exception as e:
+        db_initialized = False
+        raise e
 
 
 async def close_db():
