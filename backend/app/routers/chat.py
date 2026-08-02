@@ -106,12 +106,16 @@ async def send_message(
         full_response = ""
         skill_type = None
 
+        # Create a dedicated local session for the duration of the event stream
+        from app.database import db_initialized, async_session_factory
+        local_db = async_session_factory() if db_initialized else None
+
         try:
-            # Route to appropriate skill
+            # Route to appropriate skill using local_db session
             skill_type, token_stream = await agent_router.route(
                 message=body.content,
                 conversation_history=history,
-                db=db,
+                db=local_db,
                 skill_hint=body.skill_hint,
             )
 
@@ -189,12 +193,12 @@ async def send_message(
                 }
                 return
 
-        # Save assistant message
+        # Save assistant message using local_db session
         try:
             assistant_msg_id = uuid.uuid4()
             now = datetime.now(timezone.utc)
             
-            if db is None:
+            if local_db is None:
                 assistant_message = {
                     "id": assistant_msg_id,
                     "session_id": session_id,
@@ -243,14 +247,14 @@ async def send_message(
                     content=full_response,
                     skill_used=skill_type.value if skill_type else None,
                 )
-                db.add(assistant_message)
-                await db.flush()
+                local_db.add(assistant_message)
+                await local_db.flush()
 
                 # Extract and save artifacts if present
                 artifacts = extract_artifacts(full_response, assistant_message.id, session_id)
                 for artifact in artifacts:
-                    db.add(artifact)
-                    await db.flush()
+                    local_db.add(artifact)
+                    await local_db.flush()
 
                     yield {
                         "event": "artifact",
@@ -262,7 +266,7 @@ async def send_message(
                         }),
                     }
 
-                await db.commit()
+                await local_db.commit()
 
             # Send done event
             yield {
@@ -270,18 +274,21 @@ async def send_message(
                 "data": json.dumps({
                     "message_id": str(assistant_msg_id),
                     "skill_used": skill_type.value if skill_type else None,
-                    "session_title": session["title"] if db is None else session.title,
+                    "session_title": session["title"] if local_db is None else session.title,
                 }),
             }
 
         except Exception as e:
             logger.error(f"Error saving response: {e}", exc_info=True)
-            if db is not None:
-                await db.rollback()
+            if local_db is not None:
+                await local_db.rollback()
             yield {
                 "event": "error",
                 "data": json.dumps({"error": "Failed to save response"}),
             }
+        finally:
+            if local_db is not None:
+                await local_db.close()
 
     return EventSourceResponse(event_stream())
 

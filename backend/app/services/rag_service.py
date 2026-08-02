@@ -36,12 +36,15 @@ async def retrieve_from_files(query: str, top_k: int = 5) -> List[RetrievedChunk
     # Import ingestion parser helpers
     from app.ingestion.ingest import parse_transcript, chunk_text
 
-    keywords = [w.lower() for w in re.findall(r"\b\w{4,}\b", query)]
+    # Extract words with 3+ characters (so short names like 'ami' aren't ignored)
+    keywords = [w.lower() for w in re.findall(r"\b\w{3,}\b", query)]
     if not keywords:
         keywords = [w.lower() for w in query.split() if w.strip()]
 
     scored_chunks = []
     episode_dirs = list(episodes_dir.iterdir())
+
+    query_normalized = query.lower().replace("-", " ")
 
     for episode_dir in episode_dirs:
         transcript_file = episode_dir / "transcript.md"
@@ -49,6 +52,8 @@ async def retrieve_from_files(query: str, top_k: int = 5) -> List[RetrievedChunk
             continue
 
         guest_name = episode_dir.name
+        guest_name_clean = guest_name.replace("-", " ").lower()
+
         metadata, content = parse_transcript(transcript_file)
         if not content:
             continue
@@ -56,14 +61,17 @@ async def retrieve_from_files(query: str, top_k: int = 5) -> List[RetrievedChunk
         title = metadata.get("title", guest_name)
         chunks = chunk_text(content)
 
+        # Check if guest's name is in query
+        guest_matched = guest_name_clean in query_normalized or all(part in query_normalized for part in guest_name_clean.split())
+
         for chunk_text_content in chunks:
             chunk_lower = chunk_text_content.lower()
             # Calculate match frequency
             score = sum(chunk_lower.count(kw) for kw in keywords)
 
-            # Give bonus if guest's name is mentioned in query
-            if guest_name.replace("-", " ").lower() in query.lower():
-                score += 5
+            # Strong boost if this episode matches the requested guest
+            if guest_matched:
+                score += 15
 
             if score > 0:
                 scored_chunks.append((
@@ -90,8 +98,8 @@ async def retrieve_from_files(query: str, top_k: int = 5) -> List[RetrievedChunk
 async def retrieve_relevant_chunks(
     query: str,
     db: AsyncSession,
-    top_k: int = 5,
-    similarity_threshold: float = 0.3,
+    top_k: int = 8,
+    similarity_threshold: float = 0.1,
 ) -> List[RetrievedChunk]:
     """
     Embed the query and find the most relevant transcript chunks via cosine similarity.
@@ -102,35 +110,59 @@ async def retrieve_relevant_chunks(
 
     try:
         query_embedding = await generate_embedding(query)
+        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
     except Exception as e:
         logger.error(f"Failed to embed query: {e}")
-        return []
+        return await retrieve_from_files(query, top_k)
 
-    # pgvector cosine distance: smaller = more similar
-    # Use <=> operator for cosine distance
-    embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+    # Check if query mentions a specific guest in the database
+    matched_guest = None
+    try:
+        guests_res = await db.execute(text("SELECT DISTINCT episode_guest FROM transcript_chunks WHERE episode_guest IS NOT NULL"))
+        all_guests = [r[0] for r in guests_res.fetchall()]
+        query_norm = query.lower().replace("-", " ")
+        for g in all_guests:
+            if not g:
+                continue
+            g_clean = g.replace("-", " ").lower()
+            if g_clean in query_norm or all(w in query_norm for w in g_clean.split()):
+                matched_guest = g
+                logger.info(f"RAG detected specific guest in query: '{matched_guest}'")
+                break
+    except Exception as e:
+        logger.warning(f"Could not check guest list: {e}")
 
-    sql = text(f"""
-        SELECT 
-            episode_guest,
-            episode_title,
-            chunk_text,
-            metadata,
-            1 - (embedding <=> CAST(:embedding AS vector)) as similarity
-        FROM transcript_chunks
-        WHERE embedding IS NOT NULL
-        ORDER BY embedding <=> CAST(:embedding AS vector)
-        LIMIT :top_k
-    """)
+    # Build SQL: if guest matched, restrict search to that guest's chunks
+    if matched_guest:
+        sql = text(
+            "SELECT episode_guest, episode_title, chunk_text, metadata, "
+            "    1 - (embedding <=> cast(:embedding AS vector)) as similarity "
+            "FROM transcript_chunks "
+            "WHERE episode_guest = :guest AND embedding IS NOT NULL "
+            "ORDER BY embedding <=> cast(:embedding AS vector) "
+            "LIMIT :top_k"
+        )
+        params = {"embedding": embedding_str, "guest": matched_guest, "top_k": top_k}
+    else:
+        sql = text(
+            "SELECT episode_guest, episode_title, chunk_text, metadata, "
+            "    1 - (embedding <=> cast(:embedding AS vector)) as similarity "
+            "FROM transcript_chunks "
+            "WHERE embedding IS NOT NULL "
+            "ORDER BY embedding <=> cast(:embedding AS vector) "
+            "LIMIT :top_k"
+        )
+        params = {"embedding": embedding_str, "top_k": top_k}
 
-    result = await db.execute(
-        sql,
-        {"embedding": embedding_str, "top_k": top_k},
-    )
+    try:
+        result = await db.execute(sql, params)
+    except Exception as e:
+        logger.error(f"pgvector query failed: {e}. Falling back to file search.")
+        return await retrieve_from_files(query, top_k)
 
     chunks = []
     for row in result:
-        sim = float(row.similarity) if row.similarity else 0.0
+        sim = float(row.similarity) if row.similarity is not None else 0.0
         if sim >= similarity_threshold:
             chunks.append(
                 RetrievedChunk(
@@ -142,8 +174,13 @@ async def retrieve_relevant_chunks(
                 )
             )
 
-    logger.info(f"Retrieved {len(chunks)} relevant chunks for query (top similarity: {chunks[0].similarity:.3f})" if chunks else "No relevant chunks found")
+    logger.info(f"Retrieved {len(chunks)} relevant chunks for query (top similarity: {chunks[0].similarity:.3f})" if chunks else "No relevant chunks found — falling back to files")
+
+    if not chunks:
+        return await retrieve_from_files(query, top_k)
+
     return chunks
+
 
 
 def format_context(chunks: List[RetrievedChunk]) -> str:

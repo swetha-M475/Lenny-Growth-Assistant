@@ -31,18 +31,26 @@ class SkillType(str, Enum):
 
 # Keywords/patterns for intent classification
 SHIP30_KEYWORDS = [
-    "ship30", "ship 30", "essay", "article", "write about",
-    "write an essay", "write a piece", "write a post", "blog post",
-    "atomic essay", "content piece", "newsletter", "write me",
-    "draft an article", "compose", "ship30for30",
+    "ship30", "ship 30", "ship30for30", "essay", "article",
+    "write about", "write an essay", "write a piece", "write a post",
+    "blog post", "atomic essay", "content piece", "newsletter",
+    "write me", "draft an article", "compose", "write a 1250",
+    "digital essay", "thought leadership", "write up", "post on",
+    "breakdown", "guide on", "write a guide", "create a post",
+    "write a breakdown", "lessons from", "takeaways from", "summary of",
+    "create an essay", "generate essay", "write essay", "essay on",
 ]
 
 ARTIFACT_KEYWORDS = [
-    "create a", "generate a", "build a", "make a",
-    "html", "dashboard", "infographic", "visual",
-    "component", "ui", "interface", "chart",
-    "artifact", "template", "checklist", "framework document",
-    "render", "design a", "mockup",
+    "html", "dashboard", "infographic", "visual", "visualization",
+    "component", "ui component", "interface", "chart", "graph",
+    "artifact", "template", "mockup", "webpage", "page",
+    "create a dashboard", "build a dashboard", "make a dashboard",
+    "create an html", "generate an html", "create a visual",
+    "generate a visual", "create a component", "build a component",
+    "create an infographic", "generate an infographic",
+    "create a chart", "generate a chart", "create a template",
+    "render", "design a", "show me a visual", "interactive",
 ]
 
 
@@ -52,7 +60,7 @@ class AgentRouter:
     def classify_intent(self, message: str, skill_hint: Optional[str] = None) -> SkillType:
         """
         Classify the user's intent into a skill type.
-        
+
         Priority:
         1. Explicit skill_hint from the user
         2. Keyword/pattern matching
@@ -67,20 +75,17 @@ class AgentRouter:
 
         msg_lower = message.lower()
 
-        # Check for Ship30for30 intent
+        # Check for Ship30for30 intent first
         for keyword in SHIP30_KEYWORDS:
             if keyword in msg_lower:
                 logger.info(f"Classified intent as SHIP30FOR30 (matched: '{keyword}')")
                 return SkillType.SHIP30FOR30
 
-        # Check for Artifact intent
+        # Check for Artifact intent — keyword match is sufficient, no double-verb check
         for keyword in ARTIFACT_KEYWORDS:
             if keyword in msg_lower:
-                # Further check: does it seem like a generation request?
-                generation_verbs = ["create", "generate", "build", "make", "design", "render"]
-                if any(verb in msg_lower for verb in generation_verbs):
-                    logger.info(f"Classified intent as ARTIFACT (matched: '{keyword}')")
-                    return SkillType.ARTIFACT
+                logger.info(f"Classified intent as ARTIFACT (matched: '{keyword}')")
+                return SkillType.ARTIFACT
 
         # Default: Q&A
         logger.info("Classified intent as QA (default)")
@@ -101,8 +106,9 @@ class AgentRouter:
         """
         skill_type = self.classify_intent(message, skill_hint)
 
-        # Retrieve relevant transcript chunks via RAG
-        rag_chunks = await retrieve_relevant_chunks(message, db, top_k=6)
+        # Retrieve relevant transcript chunks via RAG (top_k=6 for rich context)
+        top_k = 6 if skill_type in (SkillType.SHIP30FOR30, SkillType.ARTIFACT) else 4
+        rag_chunks = await retrieve_relevant_chunks(message, db, top_k=top_k)
         context = format_context(rag_chunks)
 
         # Select system prompt based on skill

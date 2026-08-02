@@ -71,6 +71,7 @@ const api = {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let pendingEvent = null; // Track the event type across event:/data: line pairs
 
         while (true) {
             const { done, value } = await reader.read();
@@ -82,24 +83,39 @@ const api = {
 
             for (const line of lines) {
                 if (line.startsWith('event:')) {
-                    const eventType = line.slice(6).trim();
-                    continue; // Event type is on the next data line
+                    // Remember the event type for the NEXT data: line
+                    pendingEvent = line.slice(6).trim();
+                    continue;
                 }
+
                 if (line.startsWith('data:')) {
                     const rawData = line.slice(5).trim();
-                    if (!rawData) continue;
+                    if (!rawData) { pendingEvent = null; continue; }
 
                     try {
                         const data = JSON.parse(rawData);
-                        // Determine event type from the data structure
-                        if (data.skill) callbacks.onSkill?.(data.skill);
-                        else if (data.token !== undefined) callbacks.onToken?.(data.token);
-                        else if (data.id && data.type && data.content) callbacks.onArtifact?.(data);
-                        else if (data.message_id) callbacks.onDone?.(data);
-                        else if (data.error) callbacks.onError?.(data.error);
+                        const evt = pendingEvent;
+                        pendingEvent = null; // Reset after consuming
+
+                        // Dispatch by explicit SSE event type first, fallback to shape detection
+                        if (evt === 'skill' || data.skill !== undefined) {
+                            callbacks.onSkill?.(data.skill);
+                        } else if (evt === 'token' || data.token !== undefined) {
+                            callbacks.onToken?.(data.token);
+                        } else if (evt === 'artifact' || (data.id && data.type && data.content !== undefined)) {
+                            callbacks.onArtifact?.(data);
+                        } else if (evt === 'done' || data.message_id) {
+                            callbacks.onDone?.(data);
+                        } else if (evt === 'error' || data.error) {
+                            callbacks.onError?.(data.error);
+                        }
                     } catch (e) {
+                        pendingEvent = null;
                         // Not JSON, skip
                     }
+                } else if (line.trim() === '') {
+                    // Blank line = end of SSE event block
+                    pendingEvent = null;
                 }
             }
         }

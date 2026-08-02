@@ -13,6 +13,8 @@ const state = {
     artifacts: [],
     isStreaming: false,
     currentProvider: 'ollama',
+    currentArtifactMode: 'preview', // 'preview', 'code', 'split'
+    activeArtifact: null,           // Current selected artifact
 };
 
 // ─── DOM Elements ──────────────────────────────────────────
@@ -24,17 +26,46 @@ const dom = {
     newChatBtn: $('new-chat-btn'),
     sessionsList: $('sessions-list'),
     chatTitle: $('chat-title'),
+    chatArea: $('chat-area'),
     messagesContainer: $('messages-container'),
     welcomeScreen: $('welcome-screen'),
     chatInput: $('chat-input'),
     sendBtn: $('send-btn'),
     skillSelect: $('skill-select'),
+    
+    // Splitters
+    chatArtifactSplitter: $('chat-artifact-splitter'),
+    artifactSplitSplitter: $('artifact-split-splitter'),
+    
+    // Artifact Viewport
     artifactPanel: $('artifact-panel'),
     artifactContent: $('artifact-content'),
+    artifactViewport: $('artifact-viewport'),
     artifactTabs: $('artifact-tabs'),
     artifactToggleBtn: $('artifact-toggle-btn'),
-    artifactCloseBtn: $('artifact-close-btn'),
+    
+    // Panes
+    artifactPreviewPane: $('artifact-preview-pane'),
+    artifactIframe: $('artifact-iframe'),
+    artifactCodePane: $('artifact-code-pane'),
+    artifactCodeBlock: $('artifact-code-block'),
+    lineNumbers: $('line-numbers'),
+    artifactMarkdownPane: $('artifact-markdown-pane'),
+    artifactMarkdownRender: $('artifact-markdown-render'),
+    
+    // Toolbar buttons
+    artifactViewModes: $('artifact-view-modes'),
+    modePreview: $('mode-preview'),
+    modeCode: $('mode-code'),
+    modeSplit: $('mode-split'),
+    artifactRefreshBtn: $('artifact-refresh-btn'),
     artifactCopyBtn: $('artifact-copy-btn'),
+    artifactDownloadHtmlBtn: $('artifact-download-html-btn'),
+    artifactDownloadZipBtn: $('artifact-download-zip-btn'),
+    artifactFullscreenBtn: $('artifact-fullscreen-btn'),
+    artifactCloseBtn: $('artifact-close-btn'),
+    
+    // Settings
     settingsBtn: $('settings-btn'),
     settingsModal: $('settings-modal'),
     settingsCloseBtn: $('settings-close-btn'),
@@ -46,6 +77,14 @@ const dom = {
     connectionStatus: $('connection-status'),
     providerLabel: $('provider-label'),
     mobileMenuBtn: $('mobile-menu-btn'),
+    voiceBtn: $('voice-btn'),
+
+    // Fullscreen view modal
+    fullscreenArtifactModal: $('fullscreen-artifact-modal'),
+    fullscreenModalTitle: $('fullscreen-modal-title'),
+    fullscreenRefreshBtn: $('fullscreen-refresh-btn'),
+    fullscreenCloseBtn: $('fullscreen-close-btn'),
+    fullscreenModalBody: $('fullscreen-modal-body'),
 };
 
 // ─── Initialize ────────────────────────────────────────────
@@ -56,13 +95,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Configure marked.js for Markdown rendering
     if (window.marked) {
-        marked.setOptions({
-            highlight: function (code, lang) {
+        const { markedHighlight } = window.markedHighlight;
+        marked.use(markedHighlight({
+            langPrefix: 'hljs language-',
+            highlight(code, lang) {
                 if (window.hljs && lang && hljs.getLanguage(lang)) {
                     return hljs.highlight(code, { language: lang }).value;
                 }
+                if (window.hljs) {
+                    return hljs.highlightAuto(code).value;
+                }
                 return code;
-            },
+            }
+        }));
+        marked.use({
             breaks: true,
             gfm: true,
         });
@@ -83,6 +129,9 @@ function setupEventListeners() {
     dom.chatInput.addEventListener('keydown', handleInputKeydown);
     dom.sendBtn.addEventListener('click', sendMessage);
 
+    // Voice Search
+    initVoiceSearch();
+
     // Suggestion Chips
     document.querySelectorAll('.suggestion-chip').forEach((chip) => {
         chip.addEventListener('click', () => {
@@ -92,10 +141,34 @@ function setupEventListeners() {
         });
     });
 
-    // Artifact Panel
+    // Panel controls
     dom.artifactCloseBtn.addEventListener('click', closeArtifactPanel);
     dom.artifactToggleBtn.addEventListener('click', toggleArtifactPanel);
+
+    // View Modes Toggles
+    dom.modePreview.addEventListener('click', () => setArtifactMode('preview'));
+    dom.modeCode.addEventListener('click', () => setArtifactMode('code'));
+    dom.modeSplit.addEventListener('click', () => setArtifactMode('split'));
+
+    // Action Toolbar buttons
+    dom.artifactRefreshBtn.addEventListener('click', refreshArtifactPreview);
     dom.artifactCopyBtn.addEventListener('click', copyArtifactContent);
+    dom.artifactDownloadHtmlBtn.addEventListener('click', downloadArtifactHtml);
+    dom.artifactDownloadZipBtn.addEventListener('click', downloadArtifactZip);
+    dom.artifactFullscreenBtn.addEventListener('click', openFullscreenArtifact);
+
+    // Fullscreen modal listeners
+    dom.fullscreenCloseBtn.addEventListener('click', closeFullscreenArtifact);
+    dom.fullscreenRefreshBtn.addEventListener('click', refreshFullscreenPreview);
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeFullscreenArtifact();
+            closeSettings();
+        }
+    });
+
+    // Initialize Resize Splitters drag support
+    initResizeSplitters();
 
     // Settings
     dom.settingsBtn.addEventListener('click', openSettings);
@@ -110,6 +183,84 @@ function setupEventListeners() {
 
     dom.testConnectionBtn.addEventListener('click', testConnection);
     dom.saveSettingsBtn.addEventListener('click', saveSettings);
+}
+
+// ─── Voice Search ──────────────────────────────────────────
+function initVoiceSearch() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        dom.voiceBtn.classList.add('unsupported');
+        dom.voiceBtn.title = 'Voice search not supported in this browser';
+        dom.voiceBtn.disabled = true;
+        return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    let isListening = false;
+    let finalTranscript = '';
+
+    recognition.onstart = () => {
+        isListening = true;
+        finalTranscript = '';
+        dom.voiceBtn.classList.add('listening');
+        dom.voiceBtn.title = 'Listening… click to stop';
+    };
+
+    recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+                finalTranscript += transcript;
+            } else {
+                interim += transcript;
+            }
+        }
+        // Show live interim text in the input as user speaks
+        dom.chatInput.value = finalTranscript + interim;
+        // Manually enable send button since programmatic value changes don't fire the input event
+        dom.sendBtn.disabled = false;
+        dom.chatInput.style.height = 'auto';
+        dom.chatInput.style.height = Math.min(dom.chatInput.scrollHeight, 200) + 'px';
+    };
+
+    recognition.onend = () => {
+        isListening = false;
+        dom.voiceBtn.classList.remove('listening');
+        dom.voiceBtn.title = 'Click to speak';
+        const text = finalTranscript.trim();
+        if (text) {
+            dom.chatInput.value = text;
+            dom.sendBtn.disabled = false;
+            // Auto-send the recognized speech
+            sendMessage();
+        }
+    };
+
+    recognition.onerror = (event) => {
+        isListening = false;
+        dom.voiceBtn.classList.remove('listening');
+        dom.voiceBtn.title = 'Click to speak';
+        if (event.error !== 'aborted' && event.error !== 'no-speech') {
+            showToast(`Voice error: ${event.error}`, 'error');
+        }
+    };
+
+    dom.voiceBtn.addEventListener('click', () => {
+        if (state.isStreaming) return;
+        if (isListening) {
+            recognition.stop();
+        } else {
+            dom.chatInput.value = '';
+            handleInputChange();
+            recognition.start();
+        }
+    });
 }
 
 // ─── Session Management ────────────────────────────────────
@@ -353,16 +504,16 @@ function renderMessages() {
 
 function extractFrontendArtifacts(msg) {
     if (msg.role !== 'assistant') return;
-    
+
     if (!msg.artifacts) msg.artifacts = [];
-    
-    // 1. Extract XML <artifact> tags
-    const artifactRegex = /<artifact\s+type="(html|markdown)"\s+title="([^"]*)">([\s\S]*?)<\/artifact>/gi;
+
+    // 1. Extract XML <artifact> tags (case-insensitive, handles multiline attributes)
+    const artifactRegex = /<artifact\s+type=["'](html|markdown)["']\s+title=["']([^"']*)["']\s*>([\s\S]*?)<\/artifact>/gi;
     let match;
     const contentToParse = msg.content;
-    
+
     while ((match = artifactRegex.exec(contentToParse)) !== null) {
-        const [_, type, title, content] = match;
+        const [, type, title, content] = match;
         const cleanTitle = title.trim();
         if (!msg.artifacts.some(a => a.title === cleanTitle)) {
             const art = {
@@ -377,20 +528,21 @@ function extractFrontendArtifacts(msg) {
             }
         }
     }
-    
-    // 2. Fallback: Parse separate HTML, CSS, and JS code blocks and combine them
-    if (msg.artifacts.length === 0) {
-        const codeBlockRegex = /```(html|xml|svg|css|js|javascript)?\s*([\s\S]*?)```/gi;
+
+    // 2. Fallback: Parse fenced code blocks for HTML (runs even if some XML tags were found,
+    //    in case the LLM mixed both formats)
+    const hasHtmlArtifact = msg.artifacts.some(a => a.type === 'html');
+    if (!hasHtmlArtifact) {
+        const codeBlockRegex = /```(html|xml|svg)?\s*([\s\S]*?)```/gi;
         const htmlBlocks = [];
         const cssBlocks = [];
         const jsBlocks = [];
-        
+
         while ((match = codeBlockRegex.exec(contentToParse)) !== null) {
             const lang = (match[1] || '').toLowerCase();
             const content = match[2].trim();
-            
-            // Trust explicit language identifiers first
-            if (lang === 'html') {
+
+            if (lang === 'html' || lang === 'xml' || lang === 'svg') {
                 htmlBlocks.push(content);
             } else if (lang === 'css') {
                 cssBlocks.push(content);
@@ -398,26 +550,26 @@ function extractFrontendArtifacts(msg) {
                 jsBlocks.push(content);
             } else {
                 // Sniff content only if language tag is missing
-                if (content.includes('<html') || content.includes('<!DOCTYPE') || content.includes('<div') || content.includes('<svg') || content.includes('<body') || content.includes('<style')) {
+                if (content.includes('<html') || content.includes('<!DOCTYPE') || content.includes('<!doctype')) {
                     htmlBlocks.push(content);
-                } else if (content.includes('body {') || content.includes('margin:') || content.includes('padding:')) {
+                } else if ((content.includes('<div') || content.includes('<svg') || content.includes('<section')) && content.includes('<style')) {
+                    htmlBlocks.push(content);
+                } else if (content.includes('body {') || (content.includes('margin:') && content.includes('padding:'))) {
                     cssBlocks.push(content);
-                } else if (content.includes('function ') || content.includes('document.') || content.includes('let ') || content.includes('const ')) {
+                } else if (content.includes('function ') || content.includes('document.') || content.includes('const ')) {
                     jsBlocks.push(content);
                 }
             }
         }
-        
-        // If we found HTML, merge the blocks together into a single, fully-formed page
+
         if (htmlBlocks.length > 0) {
             const mainHtml = htmlBlocks.join('\n');
             const cssContent = cssBlocks.join('\n');
             const jsContent = jsBlocks.join('\n');
-            
+
             let combinedContent = '';
-            
-            if (mainHtml.includes('<html') || mainHtml.includes('<!DOCTYPE')) {
-                // Complete page: inject CSS inside </head> and JS inside </body>
+
+            if (mainHtml.includes('<html') || mainHtml.includes('<!DOCTYPE') || mainHtml.includes('<!doctype')) {
                 combinedContent = mainHtml;
                 if (cssContent) {
                     if (combinedContent.includes('</head>')) {
@@ -434,36 +586,9 @@ function extractFrontendArtifacts(msg) {
                     }
                 }
             } else {
-                // HTML snippet: wrap in standard HTML skeleton with styling and script tags
-                combinedContent = `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Visualization</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0;
-            padding: 24px;
-            background: #0f172a;
-            color: #f1f5f9;
-        }
-        ${cssContent}
-    </style>
-</head>
-<body>
-    ${mainHtml}
-    
-    <script>
-        // Wait for DOM loading
-        document.addEventListener('DOMContentLoaded', () => {
-            ${jsContent}
-        });
-    </script>
-</body>
-</html>`;
+                combinedContent = `<!DOCTYPE html>\n<html>\n<head>\n    <meta charset="utf-8">\n    <title>Visualization</title>\n    <style>\n        body { font-family: -apple-system, sans-serif; margin: 0; padding: 24px; background: #0f172a; color: #f1f5f9; }\n        ${cssContent}\n    </style>\n</head>\n<body>\n    ${mainHtml}\n    <script>\n        document.addEventListener('DOMContentLoaded', () => { ${jsContent} });\n    </script>\n</body>\n</html>`;
             }
-            
+
             const art = {
                 id: 'fe-combined-' + Math.random().toString(36).substr(2, 9),
                 type: 'html',
@@ -500,25 +625,47 @@ function createMessageElement(msg) {
         // Strip XML artifacts from the chat bubble
         let cleanContent = msg.content.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/gi, '').trim();
         // Strip raw HTML code blocks if they were extracted to side panel
-        if (msg.artifacts.length > 0) {
+        if (msg.artifacts && msg.artifacts.length > 0) {
             cleanContent = cleanContent.replace(/```html[\s\S]*?```/gi, '').trim();
+            cleanContent = cleanContent.replace(/```xml[\s\S]*?```/gi, '').trim();
+            cleanContent = cleanContent.replace(/```svg[\s\S]*?```/gi, '').trim();
+            
+            // Strip raw HTML that leaked outside artifact/code-block wrappers
+            const withoutCodeBlocks = cleanContent.replace(/```[\s\S]*?```/g, '');
+            if (withoutCodeBlocks.includes('<!DOCTYPE') || withoutCodeBlocks.includes('<html') || withoutCodeBlocks.includes('<!doctype')) {
+                // Find the position of the first HTML tag and truncate
+                const firstHtmlTag = Math.min(
+                    cleanContent.indexOf('<!DOCTYPE') !== -1 ? cleanContent.indexOf('<!DOCTYPE') : Infinity,
+                    cleanContent.indexOf('<html') !== -1 ? cleanContent.indexOf('<html') : Infinity,
+                    cleanContent.indexOf('<!doctype') !== -1 ? cleanContent.indexOf('<!doctype') : Infinity,
+                );
+                if (firstHtmlTag !== Infinity) {
+                    cleanContent = cleanContent.substring(0, firstHtmlTag).trim();
+                }
+            }
         }
-        renderedContent = renderMarkdown(cleanContent);
+        // Strip incomplete <artifact open tags if the response was truncated
+        const partialIdx = cleanContent.indexOf('<artifact');
+        if (partialIdx !== -1) {
+            cleanContent = cleanContent.substring(0, partialIdx).trim();
+        }
+        renderedContent = renderMarkdown(cleanContent) || '<em>Generated an interactive artifact \u2192</em>';
     } else {
         renderedContent = escapeHtml(msg.content);
     }
 
-    // Build artifact buttons
-    let artifactBtns = '';
+    // Build artifact notice box and view button
+    let artifactCardHtml = '';
     if (msg.artifacts && msg.artifacts.length > 0) {
         msg.artifacts.forEach((a) => {
-            artifactBtns += `
+            artifactCardHtml += `
+                <div class="artifact-card-notice">
+                    <span class="artifact-check-icon">✅</span>
+                    <span><strong>${escapeHtml(a.title || 'Artifact')}</strong> — Your artifact is ready! Click the button below to open it.</span>
+                </div>
                 <button class="view-artifact-btn" data-artifact-id="${a.id}" onclick="showArtifactById('${a.id}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2"/>
-                        <path d="M12 3v18"/>
-                    </svg>
-                    ${escapeHtml(a.title || 'View Artifact')}
+                    <span class="artifact-btn-icon">📑</span>
+                    View Artifact: ${escapeHtml(a.title || 'View Artifact')}
                 </button>
             `;
         });
@@ -534,7 +681,7 @@ function createMessageElement(msg) {
             <div class="message-content${msg.id === 'streaming' ? ' streaming-cursor' : ''}">
                 ${renderedContent}
             </div>
-            ${artifactBtns}
+            ${artifactCardHtml}
         </div>
     `;
 
@@ -556,7 +703,40 @@ function updateStreamingMessage(msg) {
 
     // Update content — render as markdown incrementally
     const contentEl = el.querySelector('.message-content');
-    let cleanContent = msg.content.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/g, '').trim();
+    let cleanContent = msg.content;
+
+    // Strip completed <artifact>...</artifact> blocks
+    cleanContent = cleanContent.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/gi, '').trim();
+
+    // Strip partial/in-progress <artifact ...> open tag and everything after it
+    // (this prevents raw HTML from leaking into the chat during streaming)
+    const partialArtifactIdx = cleanContent.indexOf('<artifact');
+    if (partialArtifactIdx !== -1) {
+        cleanContent = cleanContent.substring(0, partialArtifactIdx).trim();
+        // Show a generating indicator
+        cleanContent += '\n\n✨ *Generating interactive artifact...*';
+    }
+
+    // Also detect raw HTML that's NOT inside artifact tags (fenced code block HTML)
+    // If the skill is 'artifact' and we see raw HTML tags building up, suppress them
+    if (msg.skill_used === 'artifact' && !cleanContent.includes('<artifact')) {
+        // Check if the content contains substantial raw HTML (not in markdown code blocks)
+        const rawHtmlCheck = cleanContent.replace(/```[\s\S]*?```/g, '');
+        if (rawHtmlCheck.includes('<!DOCTYPE') || rawHtmlCheck.includes('<html') || 
+            (rawHtmlCheck.includes('<style>') && rawHtmlCheck.includes('<body'))) {
+            // Strip everything from the first HTML tag onward
+            const htmlStart = Math.min(
+                rawHtmlCheck.indexOf('<!DOCTYPE') !== -1 ? rawHtmlCheck.indexOf('<!DOCTYPE') : Infinity,
+                rawHtmlCheck.indexOf('<html') !== -1 ? rawHtmlCheck.indexOf('<html') : Infinity,
+                rawHtmlCheck.indexOf('<!doctype') !== -1 ? rawHtmlCheck.indexOf('<!doctype') : Infinity
+            );
+            if (htmlStart !== Infinity) {
+                cleanContent = cleanContent.substring(0, htmlStart).trim();
+                cleanContent += '\n\n✨ *Generating interactive artifact...*';
+            }
+        }
+    }
+
     contentEl.innerHTML = renderMarkdown(cleanContent);
     contentEl.classList.add('streaming-cursor');
 }
@@ -588,8 +768,17 @@ function hideWelcomeScreen() {
 }
 
 // ─── Artifact Panel ────────────────────────────────────────
+let currentBlobUrl = null;
+
 function showArtifact(artifact) {
+    state.activeArtifact = artifact;
     dom.artifactPanel.classList.remove('hidden');
+    dom.chatArtifactSplitter.classList.remove('hidden');
+
+    // Align panels with current custom property width
+    const chatPane = dom.chatArea;
+    chatPane.style.width = `calc(100% - var(--artifact-width))`;
+
     renderArtifactTabs();
     renderArtifactContent(artifact);
 }
@@ -603,7 +792,7 @@ function renderArtifactTabs() {
     dom.artifactTabs.innerHTML = '';
     state.artifacts.forEach((a, i) => {
         const tab = document.createElement('button');
-        tab.className = `artifact-tab${i === state.artifacts.length - 1 ? ' active' : ''}`;
+        tab.className = `artifact-tab${a.id === state.activeArtifact?.id ? ' active' : ''}`;
         tab.textContent = a.title || `Artifact ${i + 1}`;
         tab.addEventListener('click', () => {
             document.querySelectorAll('.artifact-tab').forEach((t) => t.classList.remove('active'));
@@ -615,36 +804,326 @@ function renderArtifactTabs() {
 }
 
 function renderArtifactContent(artifact) {
-    dom.artifactContent.innerHTML = '';
+    state.activeArtifact = artifact;
+    
+    // Re-highlight target tab in case tabs list updated
+    const tabs = dom.artifactTabs.querySelectorAll('.artifact-tab');
+    state.artifacts.forEach((a, idx) => {
+        if (a.id === artifact.id && tabs[idx]) {
+            tabs.forEach(t => t.classList.remove('active'));
+            tabs[idx].classList.add('active');
+        }
+    });
 
     const type = artifact.type || artifact.artifact_type;
+    
     if (type === 'html') {
+        refreshArtifactPreview();
+        renderArtifactCode(artifact);
+        setArtifactMode(state.currentArtifactMode || 'preview');
+    } else {
+        // Markdown Rendering
+        const renderDiv = dom.artifactMarkdownRender;
+        renderDiv.innerHTML = renderMarkdown(artifact.content);
+        setArtifactMode('markdown');
+    }
+
+    // Store raw content for copy / export actions
+    dom.artifactContent.dataset.currentContent = artifact.content;
+}
+
+function setArtifactMode(mode) {
+    if (!state.activeArtifact) return;
+
+    state.currentArtifactMode = mode;
+
+    // Toggle active tabs style
+    dom.modePreview.classList.toggle('active', mode === 'preview');
+    dom.modeCode.classList.toggle('active', mode === 'code');
+    dom.modeSplit.classList.toggle('active', mode === 'split');
+
+    // Remove mode classes
+    dom.artifactViewport.classList.remove('mode-preview', 'mode-code', 'mode-split', 'mode-markdown');
+
+    const type = state.activeArtifact.type || state.activeArtifact.artifact_type;
+    if (type !== 'html') {
+        dom.artifactViewport.classList.add('mode-markdown');
+        dom.artifactViewModes.style.display = 'none';
+        dom.artifactRefreshBtn.style.display = 'none';
+        dom.artifactDownloadZipBtn.style.display = 'none';
+        dom.artifactDownloadHtmlBtn.style.display = 'none';
+        dom.artifactFullscreenBtn.style.display = 'none';
+    } else {
+        dom.artifactViewport.classList.add(`mode-${mode}`);
+        dom.artifactViewModes.style.display = 'flex';
+        dom.artifactRefreshBtn.style.display = 'flex';
+        dom.artifactDownloadZipBtn.style.display = 'flex';
+        dom.artifactDownloadHtmlBtn.style.display = 'flex';
+        dom.artifactFullscreenBtn.style.display = 'flex';
+
+        // Reset splitter positions to 50/50 in split mode
+        if (mode === 'split') {
+            dom.artifactPreviewPane.style.width = '50%';
+            dom.artifactCodePane.style.width = 'calc(50% - 6px)';
+        }
+    }
+}
+
+function renderArtifactCode(artifact) {
+    const codeBlock = dom.artifactCodeBlock;
+    codeBlock.textContent = artifact.content;
+
+    // Syntax highlight code block
+    if (window.hljs) {
+        hljs.highlightElement(codeBlock);
+    }
+
+    // Populate line numbers sidebar
+    generateLineNumbers(artifact.content);
+}
+
+function generateLineNumbers(code) {
+    const linesContainer = dom.lineNumbers;
+    linesContainer.innerHTML = '';
+    const lines = code.split('\n');
+    lines.forEach((_, idx) => {
+        const span = document.createElement('span');
+        span.textContent = idx + 1;
+        linesContainer.appendChild(span);
+    });
+}
+
+function refreshArtifactPreview() {
+    if (!state.activeArtifact) return;
+
+    if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl);
+    }
+
+    const type = state.activeArtifact.type || state.activeArtifact.artifact_type;
+    if (type === 'html') {
+        let content = state.activeArtifact.content;
+
+        // Theme Safety Net: If generated HTML lacks explicit dark background styling,
+        // inject a default glassmorphic dark design system into <head> so it never renders plain white
+        const defaultDarkTheme = `
+    <style id="theme-fallback">
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        * { box-sizing: border-box; }
+        html, body {
+            background: #0f172a !important;
+            color: #f1f5f9 !important;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+            margin: 0;
+            padding: 24px;
+            min-height: 100vh;
+        }
+        h1, h2, h3, h4 {
+            color: #38bdf8 !important;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 12px;
+        }
+        p { color: #cbd5e1; line-height: 1.6; margin-bottom: 12px; }
+        ul, ol { padding-left: 20px; line-height: 1.8; color: #cbd5e1; margin-bottom: 16px; }
+        li { margin-bottom: 6px; }
+        button, .btn, .cta {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+            color: #ffffff !important;
+            border: none !important;
+            padding: 10px 20px !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            cursor: pointer !important;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4) !important;
+            transition: all 0.2s ease !important;
+        }
+        button:hover, .btn:hover, .cta:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6) !important;
+        }
+        .section, .card, .box, section, div:has(> h2), div:has(> h3) {
+            background: rgba(30, 41, 59, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            backdrop-filter: blur(12px);
+        }
+    </style>`;
+
+        const hasBackgroundStyle = content.includes('background:') || content.includes('background-color:');
+        if (!hasBackgroundStyle) {
+            if (content.includes('</head>')) {
+                content = content.replace('</head>', `${defaultDarkTheme}\n</head>`);
+            } else if (content.includes('<html>')) {
+                content = content.replace('<html>', `<html>\n<head>${defaultDarkTheme}</head>`);
+            } else {
+                content = `<!DOCTYPE html>\n<html>\n<head>${defaultDarkTheme}</head>\n<body>\n${content}\n</body>\n</html>`;
+            }
+        }
+
+        const blob = new Blob([content], { type: 'text/html' });
+        currentBlobUrl = URL.createObjectURL(blob);
+        dom.artifactIframe.src = currentBlobUrl;
+    }
+}
+
+function copyArtifactContent() {
+    if (!state.activeArtifact) return;
+    navigator.clipboard.writeText(state.activeArtifact.content).then(() => {
+        showToast('Code copied to clipboard!', 'success');
+    });
+}
+
+function downloadArtifactHtml() {
+    if (!state.activeArtifact) return;
+    const title = state.activeArtifact.title || 'visualization';
+    const filename = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.html`;
+
+    const blob = new Blob([state.activeArtifact.content], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded HTML: ${filename}`, 'success');
+}
+
+function downloadArtifactZip() {
+    if (!state.activeArtifact) return;
+    if (!window.JSZip) {
+        showToast('ZIP packaging requires JSZip script to load.', 'error');
+        return;
+    }
+
+    const title = state.activeArtifact.title || 'app';
+    const rawHtml = state.activeArtifact.content;
+
+    let cssContent = '';
+    let jsContent = '';
+
+    // Extract inline stylesheet contents
+    const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+    let styleMatch;
+    while ((styleMatch = styleRegex.exec(rawHtml)) !== null) {
+        cssContent += styleMatch[1].trim() + '\n\n';
+    }
+
+    // Extract inline javascript contents (excluding external CDN script tags)
+    const scriptRegex = /<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi;
+    let scriptMatch;
+    while ((scriptMatch = scriptRegex.exec(rawHtml)) !== null) {
+        jsContent += scriptMatch[1].trim() + '\n\n';
+    }
+
+    // Construct cleaned HTML page linked to separate assets
+    let cleanedHtml = rawHtml;
+    cleanedHtml = cleanedHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    if (cssContent.trim()) {
+        if (cleanedHtml.includes('</head>')) {
+            cleanedHtml = cleanedHtml.replace('</head>', '    <link rel="stylesheet" href="style.css">\n</head>');
+        } else {
+            cleanedHtml = '<link rel="stylesheet" href="style.css">\n' + cleanedHtml;
+        }
+    }
+
+    cleanedHtml = cleanedHtml.replace(/<script(?![^>]*src=)[^>]*>[\s\S]*?<\/script>/gi, '');
+    if (jsContent.trim()) {
+        if (cleanedHtml.includes('</body>')) {
+            cleanedHtml = cleanedHtml.replace('</body>', '    <script src="script.js"></script>\n</body>');
+        } else {
+            cleanedHtml = cleanedHtml + '\n<script src="script.js"></script>';
+        }
+    }
+
+    // Package ZIP package asynchronously
+    const zip = new JSZip();
+    zip.file("index.html", cleanedHtml);
+    if (cssContent.trim()) {
+        zip.file("style.css", cssContent.trim());
+    }
+    if (jsContent.trim()) {
+        zip.file("script.js", jsContent.trim());
+    }
+
+    zip.generateAsync({ type: "blob" }).then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const zipName = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.zip`;
+        a.download = zipName;
+        document.body.appendChild(a);
+        a.click();
+
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`Downloaded ZIP: ${zipName}`, 'success');
+    }).catch((e) => {
+        console.error('ZIP compilation error:', e);
+        showToast('Failed to package ZIP archive.', 'error');
+    });
+}
+
+function openFullscreenArtifact() {
+    if (!state.activeArtifact) return;
+
+    dom.fullscreenArtifactModal.classList.remove('hidden');
+    dom.fullscreenModalTitle.textContent = state.activeArtifact.title || 'Preview';
+    dom.fullscreenModalBody.innerHTML = '';
+
+    const type = state.activeArtifact.type || state.activeArtifact.artifact_type;
+    if (type === 'html') {
+        if (!currentBlobUrl) {
+            const blob = new Blob([state.activeArtifact.content], { type: 'text/html' });
+            currentBlobUrl = URL.createObjectURL(blob);
+        }
         const iframe = document.createElement('iframe');
-        iframe.sandbox = 'allow-scripts allow-same-origin';
-        iframe.srcdoc = artifact.content;
+        iframe.sandbox = 'allow-scripts allow-same-origin allow-popups allow-forms';
+        iframe.src = currentBlobUrl;
         iframe.style.width = '100%';
         iframe.style.height = '100%';
         iframe.style.border = 'none';
-        iframe.style.background = 'white';
-        dom.artifactContent.appendChild(iframe);
+        
+        dom.fullscreenModalBody.appendChild(iframe);
+        dom.fullscreenRefreshBtn.style.display = 'block';
     } else {
-        // Markdown
         const div = document.createElement('div');
         div.className = 'markdown-render';
-        div.innerHTML = renderMarkdown(artifact.content);
-        dom.artifactContent.appendChild(div);
+        div.style.padding = 'var(--space-xl)';
+        div.style.background = 'var(--bg-deepest)';
+        div.style.color = 'var(--text-primary)';
+        div.style.height = '100%';
+        div.style.overflow = 'auto';
+        div.innerHTML = renderMarkdown(state.activeArtifact.content);
+        
+        dom.fullscreenModalBody.appendChild(div);
+        dom.fullscreenRefreshBtn.style.display = 'none';
     }
+}
 
-    // Store current artifact for copy
-    dom.artifactContent.dataset.currentContent = artifact.content;
+function closeFullscreenArtifact() {
+    dom.fullscreenArtifactModal.classList.add('hidden');
+    dom.fullscreenModalBody.innerHTML = '';
+}
+
+function refreshFullscreenPreview() {
+    const iframe = dom.fullscreenModalBody.querySelector('iframe');
+    if (iframe && currentBlobUrl) {
+        iframe.src = '';
+        iframe.src = currentBlobUrl;
+    }
 }
 
 function toggleArtifactPanel() {
     if (dom.artifactPanel.classList.contains('hidden')) {
-        dom.artifactPanel.classList.remove('hidden');
         if (state.artifacts.length > 0) {
-            renderArtifactTabs();
-            renderArtifactContent(state.artifacts[state.artifacts.length - 1]);
+            showArtifact(state.activeArtifact || state.artifacts[state.artifacts.length - 1]);
         }
     } else {
         closeArtifactPanel();
@@ -653,14 +1132,93 @@ function toggleArtifactPanel() {
 
 function closeArtifactPanel() {
     dom.artifactPanel.classList.add('hidden');
+    dom.chatArtifactSplitter.classList.add('hidden');
+    dom.chatArea.style.width = '100%';
 }
 
-function copyArtifactContent() {
-    const content = dom.artifactContent.dataset.currentContent;
-    if (content) {
-        navigator.clipboard.writeText(content).then(() => {
-            showToast('Copied to clipboard!', 'success');
-        });
+/* ─── Panel Resizer Splitting ────────────────────────────────── */
+function initResizeSplitters() {
+    const chatSplitter = dom.chatArtifactSplitter;
+    const chatArea = dom.chatArea;
+    const panel = dom.artifactPanel;
+    const container = document.querySelector('.main-content');
+
+    let startX, startLeftWidth, startRightWidth;
+
+    chatSplitter.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        startX = e.clientX;
+        startLeftWidth = chatArea.getBoundingClientRect().width;
+        startRightWidth = panel.getBoundingClientRect().width;
+
+        chatSplitter.classList.add('active');
+        document.body.classList.add('resizing');
+
+        window.addEventListener('pointermove', onSplitterMove);
+        window.addEventListener('pointerup', onSplitterUp);
+    });
+
+    function onSplitterMove(e) {
+        const deltaX = e.clientX - startX;
+        const newLeftWidth = startLeftWidth + deltaX;
+        const newRightWidth = startRightWidth - deltaX;
+        const totalWidth = container.getBoundingClientRect().width;
+
+        // Apply width parameters within constraints
+        if (newLeftWidth > 320 && newRightWidth > 320) {
+            const rightPercent = (newRightWidth / totalWidth) * 100;
+            chatArea.style.width = `calc(100% - ${rightPercent}%)`;
+            panel.style.width = `${rightPercent}%`;
+            document.documentElement.style.setProperty('--artifact-width', `${rightPercent}%`);
+        }
+    }
+
+    function onSplitterUp() {
+        chatSplitter.classList.remove('active');
+        document.body.classList.remove('resizing');
+        window.removeEventListener('pointermove', onSplitterMove);
+        window.removeEventListener('pointerup', onSplitterUp);
+    }
+
+    // Inner preview/code view splitter resizing
+    const innerSplitter = dom.artifactSplitSplitter;
+    const previewPane = dom.artifactPreviewPane;
+    const codePane = dom.artifactCodePane;
+    const viewport = dom.artifactViewport;
+
+    let innerStartX, startPreviewWidth, startCodeWidth;
+
+    innerSplitter.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        innerStartX = e.clientX;
+        startPreviewWidth = previewPane.getBoundingClientRect().width;
+        startCodeWidth = codePane.getBoundingClientRect().width;
+
+        innerSplitter.classList.add('active');
+        document.body.classList.add('resizing');
+
+        window.addEventListener('pointermove', onInnerSplitterMove);
+        window.addEventListener('pointerup', onInnerSplitterUp);
+    });
+
+    function onInnerSplitterMove(e) {
+        const deltaX = e.clientX - innerStartX;
+        const newPreviewWidth = startPreviewWidth + deltaX;
+        const newCodeWidth = startCodeWidth - deltaX;
+        const totalWidth = viewport.getBoundingClientRect().width;
+
+        if (newPreviewWidth > 150 && newCodeWidth > 150) {
+            const previewPercent = (newPreviewWidth / totalWidth) * 100;
+            previewPane.style.width = `${previewPercent}%`;
+            codePane.style.width = `calc(100% - ${previewPercent}% - 6px)`;
+        }
+    }
+
+    function onInnerSplitterUp() {
+        innerSplitter.classList.remove('active');
+        document.body.classList.remove('resizing');
+        window.removeEventListener('pointermove', onInnerSplitterMove);
+        window.removeEventListener('pointerup', onInnerSplitterUp);
     }
 }
 

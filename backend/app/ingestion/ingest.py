@@ -104,20 +104,18 @@ async def ingest_transcripts(db: AsyncSession = None, force: bool = False):
         session = db
 
     try:
-        # Check if already ingested
-        if not force:
-            result = await session.execute(
-                text("SELECT COUNT(*) FROM transcript_chunks")
-            )
-            count = result.scalar()
-            if count and count > 0:
-                logger.info(f"Database already has {count} transcript chunks. Use force=True to re-ingest.")
-                return count
+        # Clear existing chunks
+        await session.execute(text("TRUNCATE TABLE transcript_chunks"))
+        await session.commit()
 
         total_chunks = 0
+        episodes_processed = 0
         episode_dirs = sorted(episodes_dir.iterdir())
 
         for episode_dir in episode_dirs:
+            if episodes_processed >= 25 or total_chunks >= 3000:
+                break
+                
             transcript_file = episode_dir / "transcript.md"
             if not transcript_file.exists():
                 continue
@@ -133,6 +131,7 @@ async def ingest_transcripts(db: AsyncSession = None, force: bool = False):
             chunks = chunk_text(content)
 
             logger.info(f"Processing {guest_name}: {len(chunks)} chunks")
+            episodes_processed += 1
 
             for i, chunk_text_content in enumerate(chunks):
                 try:

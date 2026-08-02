@@ -16,6 +16,13 @@
     <!-- Highlight.js for code highlighting -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked-highlight/lib/index.umd.js"></script>
+    
+    <!-- html2pdf for PDF downloads -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <!-- JSZip for dynamic ZIP package downloads -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     
     <link rel="stylesheet" href="css/index.css">
 </head>
@@ -148,6 +155,14 @@
                             placeholder="Ask about product, growth, or leadership insights from Lenny's Podcast..."
                             rows="1"
                         ></textarea>
+                        <button id="voice-btn" class="voice-btn" title="Click to speak" type="button">
+                            <svg id="voice-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                                <line x1="12" y1="19" x2="12" y2="23"/>
+                                <line x1="8" y1="23" x2="16" y2="23"/>
+                            </svg>
+                        </button>
                         <button id="send-btn" class="send-btn" disabled>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
@@ -158,28 +173,110 @@
                 </div>
             </div>
 
-            <!-- Artifact Panel -->
+            <!-- Chat/Artifact Splitter Handle -->
+            <div id="chat-artifact-splitter" class="chat-artifact-splitter hidden" title="Drag to Resize">
+                <div class="splitter-line"></div>
+            </div>
+
+            <!-- Redesigned Artifact Panel -->
             <div id="artifact-panel" class="artifact-panel hidden">
                 <div class="artifact-header">
                     <div class="artifact-tabs" id="artifact-tabs">
-                        <!-- Tabs rendered by JS -->
+                        <!-- File Tabs (e.g. "landing_page.html") rendered by JS -->
                     </div>
-                    <div class="artifact-actions">
-                        <button id="artifact-copy-btn" class="artifact-action-btn" title="Copy Content">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="9" y="9" width="13" height="13" rx="2"/>
-                                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                            </svg>
-                        </button>
-                        <button id="artifact-close-btn" class="artifact-action-btn" title="Close Panel">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M18 6L6 18M6 6l12 12"/>
-                            </svg>
-                        </button>
+                    <div class="artifact-header-right">
+                        <!-- Interactive View Modes (HTML/CSS/JS only) -->
+                        <div class="artifact-view-modes" id="artifact-view-modes">
+                            <button id="mode-preview" class="mode-tab active" title="Interactive Preview">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <span>Preview</span>
+                            </button>
+                            <button id="mode-code" class="mode-tab" title="View Source Code">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="16 18 22 12 16 6"/>
+                                    <polyline points="8 6 2 12 8 18"/>
+                                </svg>
+                                <span>Code</span>
+                            </button>
+                            <button id="mode-split" class="mode-tab" title="Split View">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                    <line x1="12" y1="3" x2="12" y2="21"/>
+                                </svg>
+                                <span>Split</span>
+                            </button>
+                        </div>
+
+                        <!-- Action Toolbar -->
+                        <div class="artifact-actions">
+                            <button id="artifact-refresh-btn" class="artifact-action-btn" title="Refresh Preview">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                                </svg>
+                            </button>
+                            <button id="artifact-copy-btn" class="artifact-action-btn" title="Copy Code">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                </svg>
+                            </button>
+                            <button id="artifact-download-html-btn" class="artifact-action-btn" title="Download HTML File">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="12" y1="18" x2="12" y2="12"/>
+                                    <polyline points="9 15 12 18 15 15"/>
+                                </svg>
+                            </button>
+                            <button id="artifact-download-zip-btn" class="artifact-action-btn" title="Download Code as ZIP">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                    <line x1="12" y1="11" x2="12" y2="17"/>
+                                    <polyline points="9 14 12 17 15 14"/>
+                                </svg>
+                            </button>
+                            <button id="artifact-fullscreen-btn" class="artifact-action-btn" title="Full Screen View">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                                </svg>
+                            </button>
+                            <button id="artifact-close-btn" class="artifact-action-btn" title="Close Panel">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="artifact-content" id="artifact-content">
-                    <!-- Artifact rendered here -->
+                    <div id="artifact-viewport" class="artifact-viewport mode-preview">
+                        <!-- Preview Pane -->
+                        <div id="artifact-preview-pane" class="artifact-pane">
+                            <iframe id="artifact-iframe" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+                        </div>
+                        
+                        <!-- Split View Resize Splitter -->
+                        <div id="artifact-split-splitter" class="artifact-split-splitter">
+                            <div class="splitter-line"></div>
+                        </div>
+                        
+                        <!-- Source Code Pane -->
+                        <div id="artifact-code-pane" class="artifact-pane">
+                            <div class="code-viewer-wrapper">
+                                <div class="line-numbers" id="line-numbers"></div>
+                                <pre><code id="artifact-code-block" class="language-html"></code></pre>
+                            </div>
+                        </div>
+
+                        <!-- Markdown Content Fallback -->
+                        <div id="artifact-markdown-pane" class="artifact-pane hidden">
+                            <div class="markdown-render" id="artifact-markdown-render"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
@@ -230,6 +327,30 @@
                     <button id="save-settings-btn" class="btn-primary">Save Changes</button>
                 </div>
                 <div id="connection-status" class="connection-status"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Artifact Modal -->
+    <div id="fullscreen-artifact-modal" class="modal-overlay hidden">
+        <div class="fullscreen-modal-content">
+            <div class="fullscreen-modal-header">
+                <h2 id="fullscreen-modal-title">Artifact Preview</h2>
+                <div class="fullscreen-modal-actions">
+                    <button id="fullscreen-refresh-btn" class="artifact-action-btn" title="Refresh Preview">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                        </svg>
+                    </button>
+                    <button id="fullscreen-close-btn" class="modal-close-btn" title="Exit Full Screen">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="fullscreen-modal-body" id="fullscreen-modal-body">
+                <!-- Loaded iframe inside fullscreen mode -->
             </div>
         </div>
     </div>

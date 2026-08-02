@@ -43,7 +43,7 @@ class OllamaLLM(BaseLLM):
     def __init__(self, base_url: str = None, model: str = None):
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
         self.model = model or settings.ollama_model
-        self.client = httpx.AsyncClient(timeout=120.0)
+        self.client = httpx.AsyncClient(timeout=600.0)
 
     async def generate(self, messages: List[dict], system_prompt: str = "") -> str:
         msgs = self._prepare_messages(messages, system_prompt)
@@ -62,7 +62,7 @@ class OllamaLLM(BaseLLM):
             "POST",
             f"{self.base_url}/api/chat",
             json={"model": self.model, "messages": msgs, "stream": True},
-            timeout=120.0,
+            timeout=600.0,
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():

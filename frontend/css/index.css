@@ -544,6 +544,10 @@ body {
     animation: messageSlideIn 0.3s ease-out;
 }
 
+.message.user {
+    flex-direction: row-reverse;
+}
+
 @keyframes messageSlideIn {
     from {
         opacity: 0;
@@ -568,7 +572,7 @@ body {
 }
 
 .message.user .message-avatar {
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    display: none; /* Hide avatar for user to match Claude */
 }
 
 .message.assistant .message-avatar {
@@ -578,6 +582,12 @@ body {
 .message-body {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.message.user .message-body {
+    align-items: flex-end;
 }
 
 .message-meta {
@@ -587,8 +597,12 @@ body {
     margin-bottom: var(--space-xs);
 }
 
+.message.user .message-meta {
+    display: none; /* Hide meta/name for user */
+}
+
 .message-sender {
-    font-size: 0.82rem;
+    font-size: 0.88rem;
     font-weight: 600;
     color: var(--text-primary);
 }
@@ -621,16 +635,20 @@ body {
 }
 
 .message-content {
-    font-size: 0.9rem;
-    line-height: 1.7;
+    font-size: 0.95rem;
+    line-height: 1.6;
     color: var(--text-primary);
 }
 
 .message.user .message-content {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    padding: var(--space-md);
-    border-radius: var(--radius-md) var(--radius-md) var(--radius-md) var(--radius-sm);
+    background: var(--bg-elevated);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-lg);
+    max-width: 85%;
+}
+
+.message.assistant .message-content {
+    padding-top: 4px;
 }
 
 /* Markdown content styling */
@@ -726,27 +744,53 @@ body {
     font-weight: 600;
 }
 
-/* View Artifact Button */
+/* Artifact Card Notice & Button (Image 2 style) */
+.artifact-card-notice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-lg);
+    padding: 12px var(--space-md);
+    margin-top: var(--space-sm);
+    font-size: 0.88rem;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.artifact-check-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
 .view-artifact-btn {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: 8px;
     margin-top: var(--space-sm);
-    padding: var(--space-xs) var(--space-md);
-    background: var(--accent-glow);
-    border: 1px solid var(--border-accent);
+    padding: 10px 18px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
     border-radius: var(--radius-md);
-    color: var(--accent-secondary);
+    color: #fbbf24;
     font-family: var(--font-sans);
-    font-size: 0.78rem;
-    font-weight: 500;
+    font-size: 0.85rem;
+    font-weight: 600;
     cursor: pointer;
     transition: all var(--transition-fast);
 }
 
 .view-artifact-btn:hover {
-    background: var(--accent-glow-strong);
+    background: rgba(245, 158, 11, 0.22);
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fef08a;
     transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+
+.artifact-btn-icon {
+    font-size: 0.95rem;
 }
 
 /* Typing Indicator */
@@ -865,6 +909,47 @@ body {
     transform: scale(1.05);
 }
 
+/* ─── Voice Search Button ─────────────────────────── */
+.voice-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all var(--transition-fast);
+}
+
+.voice-btn:hover {
+    background: var(--bg-active);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.voice-btn.listening {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: #ef4444;
+    color: #ef4444;
+    animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+.voice-btn.unsupported {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+@keyframes voice-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+    70%  { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+
 .input-hint {
     font-size: 0.7rem;
     color: var(--text-tertiary);
@@ -872,15 +957,67 @@ body {
     margin-top: var(--space-sm);
 }
 
+/* ─── Resizing Layout & Splitters ────────────────────────────── */
+body.resizing {
+    cursor: col-resize !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+body.resizing * {
+    pointer-events: none !important;
+}
+
+.chat-artifact-splitter {
+    width: 6px;
+    background: var(--bg-deepest);
+    cursor: col-resize;
+    position: relative;
+    z-index: 50;
+    transition: background var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.chat-artifact-splitter:hover,
+.chat-artifact-splitter.active {
+    background: var(--accent-primary);
+}
+
+.chat-artifact-splitter .splitter-line {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 32px;
+    background: var(--text-tertiary);
+    border-radius: var(--radius-full);
+    opacity: 0.3;
+    transition: opacity var(--transition-fast);
+}
+
+.chat-artifact-splitter:hover .splitter-line,
+.chat-artifact-splitter.active .splitter-line {
+    opacity: 1;
+    background: white;
+}
+
 /* ─── Artifact Panel ────────────────────────────────────────── */
 .artifact-panel {
     width: var(--artifact-width);
-    border-left: 1px solid var(--border-subtle);
+    min-width: 320px;
+    max-width: 85vw;
     background: var(--bg-base);
     display: flex;
     flex-direction: column;
-    transition: all var(--transition-base);
+    flex-shrink: 0;
     animation: slideInRight 0.3s ease-out;
+    position: relative;
+    z-index: 10;
+}
+
+body.resizing .artifact-panel {
+    transition: none !important; /* Disable transition during drag */
 }
 
 @keyframes slideInRight {
@@ -895,7 +1032,7 @@ body {
 }
 
 .artifact-panel.hidden {
-    display: none;
+    display: none !important;
 }
 
 .artifact-header {
@@ -905,7 +1042,9 @@ body {
     padding: var(--space-sm) var(--space-md);
     border-bottom: 1px solid var(--border-subtle);
     min-height: var(--header-height);
+    background: var(--bg-base);
     gap: var(--space-sm);
+    flex-shrink: 0;
 }
 
 .artifact-tabs {
@@ -913,6 +1052,11 @@ body {
     gap: var(--space-xs);
     overflow-x: auto;
     flex: 1;
+    scrollbar-width: none; /* Hide scrollbars in tabs header */
+}
+
+.artifact-tabs::-webkit-scrollbar {
+    display: none;
 }
 
 .artifact-tab {
@@ -939,16 +1083,67 @@ body {
     color: var(--text-primary);
 }
 
+.artifact-header-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.artifact-view-modes {
+    display: flex;
+    background: var(--bg-deepest);
+    border: 1px solid var(--border-subtle);
+    padding: 2px;
+    border-radius: var(--radius-md);
+}
+
+.mode-tab {
+    background: none;
+    border: none;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.mode-tab svg {
+    opacity: 0.7;
+}
+
+.mode-tab:hover {
+    color: var(--text-primary);
+}
+
+.mode-tab.active {
+    background: var(--bg-elevated);
+    color: var(--accent-secondary);
+    box-shadow: var(--shadow-sm);
+}
+
+.mode-tab.active svg {
+    opacity: 1;
+    stroke: var(--accent-secondary);
+}
+
 .artifact-actions {
     display: flex;
     gap: var(--space-xs);
+    align-items: center;
 }
 
 .artifact-action-btn {
     background: none;
     border: 1px solid var(--border-subtle);
     color: var(--text-secondary);
-    padding: var(--space-xs);
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all var(--transition-fast);
@@ -963,29 +1158,229 @@ body {
     background: var(--bg-hover);
 }
 
+/* ─── Artifact Content & Viewport ──────────────────────────── */
 .artifact-content {
     flex: 1;
-    overflow: auto;
-    padding: 0;
+    overflow: hidden;
+    background: var(--bg-deepest);
 }
 
-.artifact-content iframe {
+.artifact-viewport {
+    display: flex;
     width: 100%;
     height: 100%;
-    border: none;
+    overflow: hidden;
+    position: relative;
+}
+
+.artifact-pane {
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    background: var(--bg-deepest);
+}
+
+/* Mode toggling states */
+.artifact-viewport.mode-preview #artifact-preview-pane {
+    width: 100% !important;
+    display: block;
+}
+.artifact-viewport.mode-preview #artifact-split-splitter,
+.artifact-viewport.mode-preview #artifact-code-pane,
+.artifact-viewport.mode-preview #artifact-markdown-pane {
+    display: none !important;
+}
+
+.artifact-viewport.mode-code #artifact-code-pane {
+    width: 100% !important;
+    display: block;
+}
+.artifact-viewport.mode-code #artifact-split-splitter,
+.artifact-viewport.mode-code #artifact-preview-pane,
+.artifact-viewport.mode-code #artifact-markdown-pane {
+    display: none !important;
+}
+
+.artifact-viewport.mode-split #artifact-preview-pane {
+    width: 50%;
+    display: block;
+}
+.artifact-viewport.mode-split #artifact-split-splitter {
+    display: flex !important;
+}
+.artifact-viewport.mode-split #artifact-code-pane {
+    width: 50%;
+    display: block;
+}
+.artifact-viewport.mode-split #artifact-markdown-pane {
+    display: none !important;
+}
+
+/* Markdown pane state (overrides others if active artifact is markdown) */
+.artifact-viewport.mode-markdown #artifact-markdown-pane {
+    width: 100% !important;
+    display: block;
+}
+.artifact-viewport.mode-markdown #artifact-preview-pane,
+.artifact-viewport.mode-markdown #artifact-split-splitter,
+.artifact-viewport.mode-markdown #artifact-code-pane {
+    display: none !important;
+}
+
+/* Inner Splitter (Preview/Code split resize) */
+.artifact-split-splitter {
+    width: 6px;
+    background: var(--bg-base);
+    cursor: col-resize;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 40;
+    transition: background var(--transition-fast);
+}
+
+.artifact-split-splitter:hover,
+.artifact-split-splitter.active {
+    background: var(--accent-primary);
+}
+
+.artifact-split-splitter .splitter-line {
+    width: 2px;
+    height: 24px;
+    background: var(--text-tertiary);
+    opacity: 0.3;
+}
+
+.artifact-split-splitter:hover .splitter-line,
+.artifact-split-splitter.active .splitter-line {
+    opacity: 1;
     background: white;
 }
 
-.artifact-content .markdown-render {
-    padding: var(--space-xl);
-    line-height: 1.7;
+/* HTML Iframe Preview styles */
+.artifact-pane iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: white; /* Iframe renders on white background by default unless styled in code */
 }
 
-.artifact-content .markdown-render h1 { font-size: 1.6rem; margin-bottom: 1rem; }
-.artifact-content .markdown-render h2 { font-size: 1.3rem; margin: 1.5rem 0 0.75rem; }
-.artifact-content .markdown-render h3 { font-size: 1.1rem; margin: 1.2rem 0 0.5rem; }
-.artifact-content .markdown-render p { margin-bottom: 1rem; }
-.artifact-content .markdown-render strong { color: var(--accent-secondary); }
+/* Code Viewer styles */
+.code-viewer-wrapper {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background: #09090f;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.line-numbers {
+    padding: var(--space-md) var(--space-sm);
+    border-right: 1px solid var(--border-subtle);
+    color: var(--text-tertiary);
+    text-align: right;
+    user-select: none;
+    -webkit-user-select: none;
+    min-width: 42px;
+    background: rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+}
+
+.line-numbers span {
+    display: block;
+    height: 1.5em;
+}
+
+.code-viewer-wrapper pre {
+    margin: 0;
+    padding: var(--space-md);
+    flex: 1;
+    overflow: visible;
+}
+
+.code-viewer-wrapper code {
+    font-family: var(--font-mono);
+    background: none !important;
+    padding: 0 !important;
+    display: block;
+}
+
+/* Markdown display */
+.artifact-markdown-render {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: var(--space-xl);
+    line-height: 1.7;
+    background: var(--bg-deepest);
+}
+
+.artifact-markdown-render h1 {
+    font-size: 1.6rem;
+    margin-bottom: var(--space-md);
+    background: linear-gradient(135deg, var(--accent-secondary), #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.artifact-markdown-render h2 { font-size: 1.3rem; margin: var(--space-lg) 0 var(--space-sm); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px; }
+.artifact-markdown-render h3 { font-size: 1.1rem; margin: var(--space-md) 0 var(--space-xs); }
+.artifact-markdown-render p { margin-bottom: var(--space-md); color: var(--text-primary); }
+.artifact-markdown-render strong { color: var(--accent-secondary); }
+.artifact-markdown-render ul, .artifact-markdown-render ol { margin-left: var(--space-lg); margin-bottom: var(--space-md); }
+.artifact-markdown-render li { margin-bottom: 6px; }
+
+/* ─── Fullscreen Artifact Modal ────────────────────────────── */
+.fullscreen-modal-content {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    width: 95vw;
+    height: 90vh;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: modalSlideUp 0.3s ease-out;
+}
+
+.fullscreen-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) var(--space-lg);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-base);
+    flex-shrink: 0;
+}
+
+.fullscreen-modal-header h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.fullscreen-modal-actions {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+}
+
+.fullscreen-modal-body {
+    flex: 1;
+    overflow: hidden;
+    background: white;
+}
+
+.fullscreen-modal-body iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
 
 /* ─── Settings Modal ────────────────────────────────────────── */
 .modal-overlay {
